@@ -1,0 +1,323 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <title>JSDoc: Source: utils.js</title>
+
+    <script src="scripts/prettify/prettify.js"> </script>
+    <script src="scripts/prettify/lang-css.js"> </script>
+    <!--[if lt IE 9]>
+      <script src="//html5shiv.googlecode.com/svn/trunk/html5.js"></script>
+    <![endif]-->
+    <link type="text/css" rel="stylesheet" href="styles/prettify-tomorrow.css">
+    <link type="text/css" rel="stylesheet" href="styles/jsdoc-default.css">
+</head>
+
+<body>
+
+<div id="main">
+
+    <h1 class="page-title">Source: utils.js</h1>
+
+    
+
+
+
+    
+    <section>
+        <article>
+            <pre class="prettyprint source linenums"><code>const fs = require('fs');
+const path = require('path');
+const shajs = require('sha.js');
+
+var request;
+
+exports.setRequest = function (req) {
+  request = req;
+}
+
+exports.pad = function (n) {
+  return _pad(n);
+}
+
+var _pad = function (n) {
+  return n &lt; 10 ? '0' + n : n;
+}
+exports.getAipDirectoryFromDoc = function (doc) {
+  return _getAipDirectoryFromDoc(doc);
+}
+
+/**
+ * Set the EffectiveDate
+ * @param {*} date 
+ */
+exports.setEffectiveDate = function (date) {
+  global.effectiveDate = date;
+}
+
+/**
+ * If directory does not exist, create it
+ * @param {*} dirPath 
+ */
+exports.createDirectory = function(dirPath)
+{
+  if (fs.existsSync(dirPath)) {
+    console.log( dirPath + " exist");
+  }
+  else {
+    console.log("create " + dirPath);
+    fs.mkdirSync(dirPath, { recursive: true });
+  }
+
+}
+
+
+/**
+ * Create the local directory to store the Aip webpage.
+ * Save the path in a global var
+ */
+exports.setLocalAipDirectory = function (doc) {
+  global.LocalAipDirectory = _getAipDirectoryFromDoc(doc);
+  global.LocalMergePdfAipDir = path.join(global.LocalAipDirectory, global.AipPdfMergeSubDir);
+
+  if (fs.existsSync(global.LocalAipDirectory)) {
+    console.log("effective directory exist");
+  }
+  else {
+    console.log("effective directory does not exist, create:" + global.LocalAipDirectory);
+    fs.mkdirSync(global.LocalAipDirectory, { recursive: true });
+  }
+
+  if (fs.existsSync(global.LocalMergePdfAipDir)) { console.log("effective Pdf directory exist"); }
+  else {
+    console.log("effective directory does not exist, create:" + global.LocalMergePdfAipDir);
+    fs.mkdirSync(LocalMergePdfAipDir, { recursive: true });
+  }
+}
+
+var _getAipDirectoryFromDoc = function (doc) {
+  var yyyymmdd = doc.effectiveDate.getFullYear().toString() + _pad(doc.effectiveDate.getMonth() + 1) +
+    _pad(doc.effectiveDate.getDate());
+  return global.AipDirectory + yyyymmdd + '/';
+}
+
+
+exports.getWebData = function(param){
+return new Promise(resolve => _getAirportPage(param.name, param.url) );
+
+}
+/**
+ * Write the Aeroport Aip Page in the local Directory.
+ * If the file is present in the local directory, we read the file provided:
+ *     - the sha value is the same than the sha set in the database
+ *     - the effective date of the current analysis is the same than the database
+ *     - there is less than 15days from the last effective update
+ * If the file is not in the local directory, we retrieve it from the website, save it on the directory
+ * and create/update the database.
+ * @param {*} name name of the file
+ * @param {*} url url to the webpage
+ */
+exports.getAirportPage = async function (name, url)
+{
+  return _getAirportPage(name, url);
+}
+var _getAirportPage = async function (name, url) {
+  var filePath = path.join(global.LocalAipDirectory, name);
+  var date = new Date();
+
+  if (fs.existsSync(filePath)) {
+    var data = await new Promise(function (resolve, reject) {
+      fs.readFile(filePath, 'utf8', async function (err, contents) {
+        resolve(contents);
+      });
+    });
+    //compute the sha of the file
+    var sha = await new Promise(function (resolve, reject) {
+      resolve(shajs('sha256').update(data).digest('hex'));
+    });
+    //retrieve the data in the database for comparison
+    var dbo = global.db.collection("airportPages");
+    var dbPage = await dbo.findOne({ "effectiveDate": global.effectiveDate, pageName: name }, { "sha": 1 });
+    if ((dbPage == null) || (dbPage.effectiveDate === undefined) || (dbPage.lastCheckDate === undefined)) {
+      /*var aipArpPage =  new Promise(function (resolve, reject) {
+        resolve(retrieveAipPage(name, url));
+      });*/
+      var aipArpPage =  retrieveAipPage(name, url);
+      return aipArpPage;
+    }
+    else {
+      //We reload the webpage if
+      //There is a difference in the sha computation
+      //There is a change in the effective Data
+      //Every 15days
+      if ((sha != dbPage.sha) ||
+        (dbPage.effectiveDate.getTime() &lt; global.effectiveDate.getTime()) ||
+        ((new Date() - dbPage.lastCheckDate) > (15 * 24 * 3600 * 1000))) {
+        var aipArpPage = retrieveAipPage(name, url);
+        return aipArpPage;
+      }
+      else {
+        return data;
+      }
+    }
+  }
+  else //the file is not loaded, retrieve it from the web
+  {
+    aipArpPage = retrieveAipPage(name, url);
+    return aipArpPage;
+  }
+}
+
+/**
+ * Determine the options for a request. It uses the url to determine the kind of file 
+ * and adapt the options accordingly.
+ * for html, we use text, for pdf, it is a binary format
+ * @param {*} url 
+ */
+var determineGetOptions = function (url) {
+  var options;
+  var extension = url.substring(url.lastIndexOf('.') + 1);
+  if ((extension === 'html') || (extension === 'htm')) {
+    options = {
+      method: 'GET',
+      url: url,
+    };
+  }
+  else if ((extension === 'pdf') || (extension === 'PDF')) {
+    binary = "binary";
+    options = {
+      method: 'GET',
+      url: url,
+      encoding: "binary",
+      headers: {
+        'Content-Type': 'application/pdf',
+      },
+    };
+  }
+  else {
+    options = {
+      method: 'GET',
+      url: url,
+    };
+  }
+  return options;
+}
+
+/**
+ * Determine which kind of writeStream shall be used.
+ * Default value is "" (for text file).
+ * Following the file extension, it return a customize type
+ * @param {*} file 
+ */
+var determineWriteStreamOptions = function (file) {
+  var binary = "";
+  var extension = file.substring(file.lastIndexOf('.') + 1);
+  if ((extension === 'pdf') || (extension === 'PDF')) {
+    binary = "binary";
+  }
+  return binary;
+}
+
+/**
+ * Retrieve a page or a document (pdf,...) defined by the URL.
+ * Options are defined through determineGetOptions to determine the GET options.
+ * The writestream type is defined thanks determineWriteStreamOptions
+ * @param {*} name name of the file to write
+ * @param {*} url url of the file
+ */
+var retrieveAipPage = function (name, url) {
+  var filePath = path.join(global.LocalAipDirectory, name);
+
+  var options = determineGetOptions(url);
+  var aipArpPage =  new Promise(function (resolve, reject) {
+    request(options, function (error, res, body) {
+      if (!error &amp;&amp; res.statusCode == 200) {
+        resolve(body);
+      }
+      else {
+        reject(error);
+      }
+    });
+  });
+   var data = _writeAipPage(filePath, aipArpPage);
+   _writeInDbAptPage(aipArpPage, name);
+
+  return data;
+}
+
+/**
+ * Write a file in the appropriate AIP directory.
+ * It uses the file extension to dermine if it is necessary to use a binary type
+ * @param {*} filePath File path
+ * @param {*} aipArpPage Data to write
+ */
+var _writeAipPage = async function (filePath, aipArpPage) {
+
+  //determine the type (binary or nothing)
+  var wsType = determineWriteStreamOptions(filePath);
+
+  var wst = fs.createWriteStream(filePath);
+  wst.on('finish', function () {
+    console.log(path.basename(filePath) + ' has been download and written');
+  });
+  var data = await aipArpPage;
+  wst.write(data, wsType);
+  wst.end();
+
+  return data;
+}
+
+
+var _writeInDbAptPage = async function (data, name) {
+  var tempdata = await data;
+  var sha = new Promise(function (resolve, reject) {
+    resolve(shajs('sha256').update( tempdata).digest('hex'));
+  });
+
+  var shaval = await sha;
+  //write in the database
+  var dbo = global.db.collection("airportPages");
+  //Write the table in Db
+  dbo.insertOne({
+    pageName: name, sha: shaval, effectiveDate: global.effectiveDate,
+    lastCheckDate: new Date()
+  }).catch((err) => {
+    if (err.code == 11000) {
+      console.log("Aip Web Page " + name + " is duplicated, update the database");
+      dbo.updateOne({ pageName: name }, {
+        $set: {
+          sha: shaval,
+          lastCheckDate: new Date()
+        }
+      });
+    }
+    else {
+      console.log(err);
+    }
+  });
+}
+
+
+</code></pre>
+        </article>
+    </section>
+
+
+
+
+</div>
+
+<nav>
+    <h2><a href="index.html">Home</a></h2><h3>Global</h3><ul><li><a href="global.html#_writeAipPage">_writeAipPage</a></li><li><a href="global.html#connectToMlit">connectToMlit</a></li><li><a href="global.html#createDirectory">createDirectory</a></li><li><a href="global.html#determineGetOptions">determineGetOptions</a></li><li><a href="global.html#determineWriteStreamOptions">determineWriteStreamOptions</a></li><li><a href="global.html#formData">formData</a></li><li><a href="global.html#getAirportPage">getAirportPage</a></li><li><a href="global.html#retrieveAipPage">retrieveAipPage</a></li><li><a href="global.html#setEffectiveDate">setEffectiveDate</a></li><li><a href="global.html#setLocalAipDirectory">setLocalAipDirectory</a></li></ul>
+</nav>
+
+<br class="clear">
+
+<footer>
+    Documentation generated by <a href="https://github.com/jsdoc3/jsdoc">JSDoc 3.5.5</a> on Wed Nov 28 2018 21:49:15 GMT+0900 (GMT+09:00)
+</footer>
+
+<script> prettyPrint(); </script>
+<script src="scripts/linenumber.js"> </script>
+</body>
+</html>

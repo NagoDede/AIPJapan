@@ -1,0 +1,198 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <title>JSDoc: Source: mlit.js</title>
+
+    <script src="scripts/prettify/prettify.js"> </script>
+    <script src="scripts/prettify/lang-css.js"> </script>
+    <!--[if lt IE 9]>
+      <script src="//html5shiv.googlecode.com/svn/trunk/html5.js"></script>
+    <![endif]-->
+    <link type="text/css" rel="stylesheet" href="styles/prettify-tomorrow.css">
+    <link type="text/css" rel="stylesheet" href="styles/jsdoc-default.css">
+</head>
+
+<body>
+
+<div id="main">
+
+    <h1 class="page-title">Source: mlit.js</h1>
+
+    
+
+
+
+    
+    <section>
+        <article>
+            <pre class="prettyprint source linenums"><code>
+const loginpage = 'https://aisjapan.mlit.go.jp/LoginAction.do';
+
+var mainPath;
+global.AipDirectory = '/wrk/Programmation/JapanAip/AipPages/';
+global.AipPdfMergeSubDir= 'PdfMerge';
+
+
+var asyncInitRequest = async function () {
+  //connect to the database
+  global.db = await asyncMongoConnect();
+
+  //connect to the website thanks the login and passsword
+  let connected = await connectToMlit(loginpage);
+  if (connected) {
+    //retrieve the aipdocument list
+    //and record the list in mongoDb
+    var surfacesList;
+    var eDoc = await aipMain.getAipDocuments();
+
+    //Write the table in Db
+    db.collection('documents').insertMany(eDoc, { ordered: false }).catch((err) => {
+      if (err.code == 11000) {
+        console.log("Some Documents are duplicated");
+      }
+      else {
+        console.log(err);
+      }
+    });
+
+    //retrieve the active document from the database. If there is a difference, it means there is an update
+    var dbEffective = await db.collection('documents').findOne({"activeState": true}, {"effectiveDate": 1, "publicationDate" : 1 });
+    if (dbEffective != null){
+    if ((dbEffective.effectiveDate.getTime() == eDoc.effectiveDoc.effectiveDate.getTime()) &amp;&amp;
+      (dbEffective.publicationDate.getTime() == eDoc.effectiveDoc.publicationDate.getTime()))
+      {
+        console.log("Current effective document remains effective");
+      }
+    else
+      {console.log("Document effectivity change");
+        //set all the records to activestate false
+        db.collection('documents').updateMany({"activeState": true}, { $set: { "activeState" : false } });
+        db.collection('documents').updateOne({"effectiveDate": eDoc.effectiveDoc.effectiveDate, 
+        "publicationDate": eDoc.effectiveDoc.publicationDate}, { $set: { "activeState" : true } });
+      }
+    }
+    else
+    {
+     var res = await db.collection('documents').updateOne({"effectiveDate": eDoc.effectiveDoc.effectiveDate, 
+      "publicationDate": eDoc.effectiveDoc.publicationDate}, { $set: { "activeState" : true } });
+    }
+ 
+
+    console.log(eDoc);
+    //set the effective Date to the project
+    utils.setEffectiveDate(eDoc.effectiveDoc.effectiveDate);
+    //creat the effective directory to store the aip file
+    utils.setLocalAipDirectory(eDoc.effectiveDoc);
+    //retrieve the list of the surfaces and the associated content
+    await aip.getAipSurface(eDoc.effectiveDoc).then(function (surfacesList) {
+      console.log(surfacesList);
+      return 0;
+    });
+  }
+  else {
+    console.log("connection failed");
+  }
+}
+
+/**
+ * Launch the initial request on the mlit page and connect to the AIP main page through the 
+ * call back function
+ * @param {*} url 
+ */
+var connectToMlit = function (url) {
+  return new Promise(function (resolve, reject) {
+    request.post({ url: loginpage, formData: formData }, function (error, res, body) {
+      if (!error &amp;&amp; res.statusCode == 200) {
+        resolve(true);
+      }
+      else {
+        reject(error);
+      }
+    });
+  });
+}
+
+
+
+var asyncMongoConnect = function () {
+  return new Promise(function (resolve, reject) {
+    MongoClient.connect(mongoUri, { useNewUrlParser: true }, function (err, client) {
+      if (err) {
+        console.log('Error occurred while connecting to MongoDB Atlas...\n', err);
+        reject(err);
+      }
+      else {
+        console.log('Connected...');
+        resolve(client.db("aipDoc"));
+      }
+      //clientDb = client;
+      //const collection = client.db("test").collection("devices");
+      // perform actions on the collection object
+      //client.close();
+    });
+  });
+}
+
+var mongoConnection = function () {
+  return MongoClient.connect(mongoUri, { useNewUrlParser: true }, function (err, client) {
+    if (err) {
+      console.log('Error occurred while connecting to MongoDB Atlas...\n', err);
+      return (err);
+    }
+    else {
+      console.log('Connected...');
+      return (client.db("aipDoc"));
+    }
+    //clientDb = client;
+    //const collection = client.db("test").collection("devices");
+    // perform actions on the collection object
+    //client.close();
+  });
+
+}
+
+
+/*
+General loop
+**/
+const req = require('request');
+var request = req.defaults({ jar: true, strictSSL: false });
+var aipMain = require('./aip/aipmain');
+aipMain.setRequest(request);
+const frmData = require('./formData');
+var formData = frmData.getFormData();
+var aip = require('./aip/aip');
+aip.setRequest(request);
+const utils = require('./utils');
+utils.setRequest(request);
+
+const MongoClient = require('mongodb').MongoClient;
+const mongoUri = "mongodb+srv://dbAdmin:qjf314pi@cluster0-6y9s1.azure.mongodb.net/test?retryWrites=true"
+
+
+asyncInitRequest();
+
+</code></pre>
+        </article>
+    </section>
+
+
+
+
+</div>
+
+<nav>
+    <h2><a href="index.html">Home</a></h2><h3>Global</h3><ul><li><a href="global.html#_writeAipPage">_writeAipPage</a></li><li><a href="global.html#connectToMlit">connectToMlit</a></li><li><a href="global.html#createDirectory">createDirectory</a></li><li><a href="global.html#determineGetOptions">determineGetOptions</a></li><li><a href="global.html#determineWriteStreamOptions">determineWriteStreamOptions</a></li><li><a href="global.html#formData">formData</a></li><li><a href="global.html#getAirportPage">getAirportPage</a></li><li><a href="global.html#retrieveAipPage">retrieveAipPage</a></li><li><a href="global.html#setEffectiveDate">setEffectiveDate</a></li><li><a href="global.html#setLocalAipDirectory">setLocalAipDirectory</a></li></ul>
+</nav>
+
+<br class="clear">
+
+<footer>
+    Documentation generated by <a href="https://github.com/jsdoc3/jsdoc">JSDoc 3.5.5</a> on Wed Nov 28 2018 21:49:15 GMT+0900 (GMT+09:00)
+</footer>
+
+<script> prettyPrint(); </script>
+<script src="scripts/linenumber.js"> </script>
+</body>
+</html>

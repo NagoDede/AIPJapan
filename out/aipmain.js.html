@@ -1,0 +1,234 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <title>JSDoc: Source: aipmain.js</title>
+
+    <script src="scripts/prettify/prettify.js"> </script>
+    <script src="scripts/prettify/lang-css.js"> </script>
+    <!--[if lt IE 9]>
+      <script src="//html5shiv.googlecode.com/svn/trunk/html5.js"></script>
+    <![endif]-->
+    <link type="text/css" rel="stylesheet" href="styles/prettify-tomorrow.css">
+    <link type="text/css" rel="stylesheet" href="styles/jsdoc-default.css">
+</head>
+
+<body>
+
+<div id="main">
+
+    <h1 class="page-title">Source: aipmain.js</h1>
+
+    
+
+
+
+    
+    <section>
+        <article>
+            <pre class="prettyprint source linenums"><code>const aippage = 'https://aisjapan.mlit.go.jp/html/AIP/html/DomesticAIP.do';
+const aipActivePage = 'https://aisjapan.mlit.go.jp/html/AIP/html/';
+const aipIndexPage = "JP-menu-en-JP.html";
+
+var request;
+var publicationList;
+
+/**
+ * dddd
+ * 
+ */
+/**
+ * Set the request object.
+ * Reauest object is mandatory in order to retrieve the content of the website
+ * @param {*} req 
+ */
+exports.setRequest = function (req) {
+  request = req;
+}
+
+
+/**
+ * Retrieve the publication list
+ */
+exports.getPublicationList = function() {
+  return publicationList;
+}
+
+/**
+ * Loopback function after the login.
+ * If login success (no error), request to load the AipPage
+ * @param {*} err Error
+ * @param {*} httpResponse 
+ * @param {*} body body of the return message
+ */
+exports.getAipDocuments = async function () {
+  publicationList = await doRequest(aippage).then(scrapData).then(computeCurrentFromDocList);
+  return  publicationList;
+};
+
+/**
+ * Perform the request to load the aipmain page
+ * @param {*} url 
+ */
+var doRequest = function (url) {
+  return new Promise(function (resolve, reject) {
+    request.get(url, aippage, function (err, httpResponse, body) {
+      if (err) {
+        reject(err);
+      }
+      else { 
+        resolve(body); 
+      }
+    });
+  });
+}
+
+/**
+ * Retrieves the publication dates and identify the current effective publication.
+ * The effective date is retrieved from an id set in a span field. It uses the same algorithm than the
+ * mlit website.
+ * The publication date is retrieved from the text.
+ * @param {*} body 
+ */
+var scrapData = function (body) {
+  const cheerio = require('cheerio')
+  const $ = cheerio.load(body);
+  let data = [];
+  //run accross the table in order ot identify the relevant row
+  $('tr').each((i, elm) => {
+    if ($(elm).hasClass("odd-row") || $(elm).hasClass("even-row")) {
+      var efctDate = getEffectiveDate($(elm).children().first().children("span").attr("id"));
+      const utils = require("../utils");
+      var yyyymmdd = efctDate.getFullYear().toString() + utils.pad(efctDate.getMonth() +1 ) + utils.pad(efctDate.getDate()); 
+      var mainPath = aipActivePage.concat(yyyymmdd) +"/eAIP/"+ yyyymmdd + "/";
+      
+      data.push({
+        activeState: false,
+        effectiveDate: efctDate,
+        publicationDate: getPublicationDate($(elm).children().eq(2).first().text()),
+        publicationDateText: $(elm).children().eq(2).first().text(),
+        link: aipActivePage.concat($(elm).children().eq(1).children("a").attr("href")),
+        mainPath: mainPath,
+        redirectedLink: mainPath + aipIndexPage
+      });
+
+      
+    }
+  });
+  
+  return data;
+}
+
+/**
+Identify the effective publication through the list of the publication.
+The choice is  based on the most recent effective date and the most recent publication
+**/
+var computeCurrentFromDocList = async function (data) {
+  var effectiveDoc;
+  var i = 0;
+  data.forEach(doc => {
+    if (getEffectiveDate.effectiveDate.getTime() == doc.effectiveDate.getTime()) {
+      if (getPublicationDate.mostRecentDate.getTime() == doc.publicationDate.getTime()) {
+        doc.activeState = true;
+        effectiveDoc = doc;
+        i = i+1;
+      };
+    };
+  });
+  data.effectiveDoc= effectiveDoc;
+
+  if (i == 0) 
+    {throw 'Aucune document effectif identifié'}
+  if (i > 1) {
+    throw 'Plusieur documents effectifs identifiés'
+  }
+  return data;
+}
+
+
+/**
+ * Compute the effective date of the studied publication.
+ * The computation is based on the value of the ID field, after the removal of the efct- characters. 
+ * This is the same algorithm than the MLIT website. 
+ * @param {*} idValue 
+ */
+var getEffectiveDate = function (idValue) {
+  //we record the highest effective date. This date will be used to identify the effective publication.
+  if (typeof getEffectiveDate.effectiveDate == 'undefined') {
+    // It has not... perform the initialization
+    getEffectiveDate.effectiveDate = new Date(1900, 0, 1);
+  }
+  var today = new Date();
+
+  //retrive the effective  date
+  var idx2 = idValue.indexOf("efct-");
+  if (idx2 >= 0) {
+    var efctYear = idValue.substring(5, 9);
+    var efctMth = idValue.substring(9, 11);
+    var efctDay = idValue.substring(11, 13);
+
+    var tempEfctDate = new Date(Date.UTC(efctYear, efctMth - 1, efctDay));
+
+    tempEfctDate.setUTCHours(0);
+
+    if (tempEfctDate &lt;= today) {
+      if (getEffectiveDate.effectiveDate &lt;= tempEfctDate) {
+        getEffectiveDate.effectiveDate = tempEfctDate
+      };
+    };
+  }
+
+  return tempEfctDate;
+};
+
+
+/**
+ * Compute the publication date and record the most recent publication date
+ * @param {*} link 
+ */
+var getPublicationDate = function (link) {
+
+  if (typeof getPublicationDate.mostRecentDate == 'undefined') {
+    // It has not... perform the initialization
+    getPublicationDate.mostRecentDate = new Date(1900, 0, 1);
+  }
+
+  var pubDate = new Date(link);
+  //we can't use the Date.UTC with a string inputs. In order to keep the UTC date
+  //we set UTC hours and UTCdate
+  pubDate.setUTCHours(0);
+  var day = link.substring(0, 2).trim();
+  pubDate.setUTCDate(day);
+
+  //Save the most recent date
+  if (pubDate &lt;= Date.now()) {
+    if (getPublicationDate.mostRecentDate &lt;= pubDate) {
+      getPublicationDate.mostRecentDate = pubDate
+    };
+  };
+
+  return pubDate;
+};
+</code></pre>
+        </article>
+    </section>
+
+
+
+
+</div>
+
+<nav>
+    <h2><a href="index.html">Home</a></h2><h3>Global</h3><ul><li><a href="global.html#_downloadPdf">_downloadPdf</a></li><li><a href="global.html#computeCurrentFromDocList">computeCurrentFromDocList</a></li><li><a href="global.html#doAirportList">doAirportList</a></li><li><a href="global.html#doRequest">doRequest</a></li><li><a href="global.html#downloadPdf">downloadPdf</a></li><li><a href="global.html#getAdminstrativeData">getAdminstrativeData</a></li><li><a href="global.html#getAipDocuments">getAipDocuments</a></li><li><a href="global.html#getAipSurface">getAipSurface</a></li><li><a href="global.html#getAllInfo">getAllInfo</a></li><li><a href="global.html#getAllSurfaces">getAllSurfaces</a></li><li><a href="global.html#getChartsInformation">getChartsInformation</a></li><li><a href="global.html#getEffectiveDate">getEffectiveDate</a></li><li><a href="global.html#getPdfChartFiles">getPdfChartFiles</a></li><li><a href="global.html#getPublicationDate">getPublicationDate</a></li><li><a href="global.html#getPublicationList">getPublicationList</a></li><li><a href="global.html#heliportList">heliportList</a></li><li><a href="global.html#mergePdf">mergePdf</a></li><li><a href="global.html#scrapData">scrapData</a></li><li><a href="global.html#setRequest">setRequest</a></li><li><a href="global.html#writeCharts">writeCharts</a></li></ul>
+</nav>
+
+<br class="clear">
+
+<footer>
+    Documentation generated by <a href="https://github.com/jsdoc3/jsdoc">JSDoc 3.5.5</a> on Wed Nov 28 2018 21:49:23 GMT+0900 (GMT+09:00)
+</footer>
+
+<script> prettyPrint(); </script>
+<script src="scripts/linenumber.js"> </script>
+</body>
+</html>

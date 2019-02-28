@@ -1,0 +1,6 @@
+{
+    "name": "Japan AIP",
+    "description": "A way to retrieve the information from the Japan AIP",
+    "repository": "https://github.com/NagoDede/AIPJapan",
+    "keywords": ["node", "express", "AIP"]
+  }
